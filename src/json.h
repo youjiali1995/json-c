@@ -2,8 +2,9 @@
 #define JSON_H__
 
 #include <stddef.h> /* size_t */
+#include <assert.h> /* assert */
 
-typedef enum {
+typedef enum json_type {
     JSON_STRING,
     JSON_NUMBER,
     JSON_OBJECT,
@@ -44,13 +45,18 @@ enum {
     JSON_PARSE_ERROR
 };
 
-#define json_init(v) ((v)->type = JSON_NULL)
+void json_init(json_value *v);
 
 int json_parse(json_value *v, const char *json);
 
-json_type json_get_type(const json_value *v);
-
 void json_free(json_value *v);
 
+int json_get_type(json_value *v);
+
+double json_get_number(json_value *v);
+
+char *json_get_string(json_value *v);
+
+size_t json_get_string_length(json_value *v);
 
 #endif /* JSON_H__ */
