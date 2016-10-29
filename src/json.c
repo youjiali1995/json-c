@@ -54,6 +54,12 @@ static void *json_context_pop(json_context *c, size_t size)
     return c->stack + c->top;
 }
 
+static void json_context_free(json_context *c)
+{
+    assert(c);
+    free(c->stack);
+}
+
 static void json_parse_whitespace(json_context *c)
 {
     while (ISWHITESPACE(*c->json))
@@ -72,38 +78,6 @@ static int json_parse_literal(json_context *c, json_value *v, const char *litera
     v->type = type;
     return JSON_PARSE_OK;
 }
-
-/*
-static int json_parse_true(json_context *c, json_value *v)
-{
-    assert(*c->json == 't');
-    if (strncmp(c->json, "true", 4))
-        return JSON_PARSE_ERROR;
-    c->json += 4;
-    v->type = JSON_TRUE;
-    return JSON_PARSE_OK;
-}
-
-static int json_parse_false(json_context *c, json_value *v)
-{
-    assert(*c->json == 'f');
-    if (strncmp(c->json, "false", 5))
-        return JSON_PARSE_ERROR;
-    c->json += 5;
-    v->type = JSON_FALSE;
-    return JSON_PARSE_OK;
-}
-
-static int json_parse_null(json_context *c, json_value *v)
-{
-    assert(*c->json == 'n');
-    if (strncmp(c->json, "null", 4))
-        return JSON_PARSE_ERROR;
-    c->json += 4;
-    v->type = JSON_NULL;
-    return JSON_PARSE_OK;
-}
-*/
 
 static int json_parse_number(json_context *c, json_value *v)
 {
@@ -273,14 +247,54 @@ static int json_parse_string(json_context *c, json_value *v)
     return JSON_PARSE_OK;
 }
 
-static int json_parse_object(json_context *c, json_value *v)
-{
-}
+static int json_parse_value(json_context *c, json_value *v);
 
 static int json_parse_array(json_context *c, json_value *v)
 {
+    size_t head = c->top;
+    size_t size = 0;
+
+    assert(*c->json == '[');
+    c->json++;
+    json_parse_whitespace(c);
+    if (*c->json == ']') {
+        c->json++;
+        v->type = JSON_ARRAY;
+        v->size = 0;
+        v->array = NULL;
+        return JSON_PARSE_OK;
+    }
+    for (;;) {
+        json_value e;
+
+        json_init(&e);
+        if (json_parse_value(c, &e) == JSON_PARSE_ERROR)
+            break;
+        size++;
+        json_context_push(c, &e, sizeof(json_value));
+        json_parse_whitespace(c);
+        if (*c->json == ']') {
+            c->json++;
+            v->type = JSON_ARRAY;
+            v->size = size;
+            size = sizeof(json_value) * size;
+            v->array = (json_value *) malloc(size);
+            memcpy(v->array, json_context_pop(c, size), size);
+            return JSON_PARSE_OK;
+        } else if (*c->json == ',') {
+            c->json++;
+            json_parse_whitespace(c);
+        } else
+            break;
+    }
+    while (c->top > head)
+        json_free(json_context_pop(c, sizeof(json_value)));
+    return JSON_PARSE_ERROR;
 }
 
+static int json_parse_object(json_context *c, json_value *v)
+{
+}
 
 static int json_parse_value(json_context *c, json_value *v)
 {
@@ -320,33 +334,69 @@ int json_parse(json_value *v, const char *json)
     if ((ret = json_parse_value(&c, v)) == JSON_PARSE_OK) {
         json_parse_whitespace(&c);
         if (*c.json != '\0') {
-            v->type = JSON_NULL;
+            json_free(v);
             ret = JSON_PARSE_ERROR;
         }
     }
+    json_context_free(&c);
     return ret;
 }
 
-int json_get_type(json_value *v)
+void json_free(json_value *v)
+{
+    size_t i;
+
+    assert(v);
+    switch (v->type) {
+    case JSON_STRING:
+        free(v->string);
+        break;
+    case JSON_ARRAY:
+        for (i = 0; i < v->size; i++)
+            json_free(&v->array[i]);
+        free(v->array);
+        break;
+    default:
+        break;
+    }
+    v->type = JSON_NULL;
+}
+int json_get_type(const json_value *v)
 {
     assert(v);
     return v->type;
 }
 
-double json_get_number(json_value *v)
+double json_get_number(const json_value *v)
 {
     assert(v && v->type == JSON_NUMBER);
     return v->number;
 }
 
-char *json_get_string(json_value *v)
+char *json_get_string(const json_value *v)
 {
     assert(v && v->type == JSON_STRING);
     return v->string;
 }
 
-size_t json_get_string_length(json_value *v)
+size_t json_get_string_length(const json_value *v)
 {
     assert(v && v->type == JSON_STRING);
     return v->len;
+}
+
+json_value *json_get_array_element(const json_value *v, size_t i)
+{
+    assert(v && v->type == JSON_ARRAY);
+    return &v->array[i];
+}
+
+size_t json_get_array_size(const json_value *v)
+{
+    assert(v && v->type == JSON_ARRAY);
+    return v->size;
+}
+
+json_value *json_get_object_item(const json_value *v, const char *name)
+{
 }

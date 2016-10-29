@@ -17,12 +17,11 @@ typedef enum json_type {
 typedef struct json_value json_value;
 
 struct json_value {
-    json_type type;
     union {
         /* object */
         struct {
-            char *name;
-            json_value *object;
+            json_value *name;
+            json_value *item;
             json_value *next;
         };
         /* array */
@@ -38,6 +37,7 @@ struct json_value {
         /* number */
         double number;
     };
+    json_type type;
 };
 
 enum {
@@ -51,12 +51,18 @@ int json_parse(json_value *v, const char *json);
 
 void json_free(json_value *v);
 
-int json_get_type(json_value *v);
+int json_get_type(const json_value *v);
 
-double json_get_number(json_value *v);
+double json_get_number(const json_value *v);
 
-char *json_get_string(json_value *v);
+char *json_get_string(const json_value *v);
 
-size_t json_get_string_length(json_value *v);
+size_t json_get_string_length(const json_value *v);
+
+json_value *json_get_array_element(const json_value *v, size_t i);
+
+size_t json_get_array_size(const json_value *v);
+
+json_value *json_get_object_item(const json_value *v, const char *name);
 
 #endif /* JSON_H__ */
