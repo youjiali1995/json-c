@@ -15,29 +15,36 @@ typedef enum json_type {
 } json_type;
 
 typedef struct json_value json_value;
+typedef struct json_object json_object;
 
 struct json_value {
     union {
         /* object */
         struct {
-            json_value *name;
-            json_value *item;
-            json_value *next;
+            json_object *object;
+            size_t object_size;
         };
         /* array */
         struct {
-            size_t size;
             json_value *array;
+            size_t array_size;
         };
         /* string */
         struct {
-            size_t len;
             char *string;
+            size_t string_len;
         };
         /* number */
         double number;
     };
     json_type type;
+};
+
+struct json_object {
+    char *key;
+    size_t key_len;
+    json_value value;
+    json_object *next;
 };
 
 enum {
@@ -63,6 +70,16 @@ json_value *json_get_array_element(const json_value *v, size_t i);
 
 size_t json_get_array_size(const json_value *v);
 
-json_value *json_get_object_item(const json_value *v, const char *name);
+size_t json_get_object_size(const json_value *v);
+
+const char *json_get_object_key(const json_value *v, size_t index);
+
+size_t json_get_object_key_length(const json_value *v, size_t index);
+
+json_value *json_get_object_value_index(const json_value *v, size_t index);
+
+#define json_get_object_value(v, key) json_get_object_value_n(v, key, sizeof(key) - 1)
+
+json_value *json_get_object_value_n(const json_value *v, const char *key, size_t len);
 
 #endif /* JSON_H__ */

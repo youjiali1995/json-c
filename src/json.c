@@ -240,7 +240,7 @@ static char *json_generate_string(json_context *c, size_t *len)
 
 static int json_parse_string(json_context *c, json_value *v)
 {
-    v->string = json_generate_string(c, &v->len);
+    v->string = json_generate_string(c, &v->string_len);
     if (!v->string)
         return JSON_PARSE_ERROR;
     v->type = JSON_STRING;
@@ -260,7 +260,7 @@ static int json_parse_array(json_context *c, json_value *v)
     if (*c->json == ']') {
         c->json++;
         v->type = JSON_ARRAY;
-        v->size = 0;
+        v->array_size = 0;
         v->array = NULL;
         return JSON_PARSE_OK;
     }
@@ -276,7 +276,7 @@ static int json_parse_array(json_context *c, json_value *v)
         if (*c->json == ']') {
             c->json++;
             v->type = JSON_ARRAY;
-            v->size = size;
+            v->array_size = size;
             size = sizeof(json_value) * size;
             v->array = (json_value *) malloc(size);
             memcpy(v->array, json_context_pop(c, size), size);
@@ -294,6 +294,53 @@ static int json_parse_array(json_context *c, json_value *v)
 
 static int json_parse_object(json_context *c, json_value *v)
 {
+    size_t head = c->top;
+    json_object **tail = &v->object;
+
+    assert(*c->json == '{');
+    v->type = JSON_OBJECT;
+    v->object_size = 0;
+    c->json++;
+    json_parse_whitespace(c);
+    if (*c->json == '}') {
+        c->json++;
+        v->object_size = 0;
+        v->object = NULL;
+        return JSON_PARSE_OK;
+    }
+    for (;;) {
+        json_object o;
+
+        if (*c->json != '\"' || (o.key = json_generate_string(c, &o.key_len)) == NULL)
+            break;
+        json_parse_whitespace(c);
+        if (*c->json++ != ':') {
+            free(o.key);
+            break;
+        }
+        json_parse_whitespace(c);
+        if (json_parse_value(c, &o.value) == JSON_PARSE_ERROR) {
+            free(o.key);
+            break;
+        }
+        v->object_size++;
+        *tail = (json_object *) malloc(sizeof(json_object));
+        memcpy(*tail, &o, sizeof(json_object));
+        tail = &(*tail)->next;
+        json_parse_whitespace(c);
+        if (*c->json == ',') {
+            c->json++;
+            json_parse_whitespace(c);
+        } else if (*c->json == '}') {
+            c->json++;
+            *tail = NULL;
+            return JSON_PARSE_OK;
+        } else
+            break;
+    }
+    c->top = head;
+    json_free(v);
+    return JSON_PARSE_ERROR;
 }
 
 static int json_parse_value(json_context *c, json_value *v)
@@ -345,6 +392,7 @@ int json_parse(json_value *v, const char *json)
 void json_free(json_value *v)
 {
     size_t i;
+    json_object *o;
 
     assert(v);
     switch (v->type) {
@@ -352,15 +400,26 @@ void json_free(json_value *v)
         free(v->string);
         break;
     case JSON_ARRAY:
-        for (i = 0; i < v->size; i++)
+        for (i = 0; i < v->array_size; i++)
             json_free(&v->array[i]);
         free(v->array);
+        break;
+    case JSON_OBJECT:
+        for (i = 0, o = v->object; i < v->object_size; i++) {
+            json_object *next;
+            free(o->key);
+            json_free(&o->value);
+            next = o->next;
+            free(o);
+            o = next;
+        }
         break;
     default:
         break;
     }
     v->type = JSON_NULL;
 }
+
 int json_get_type(const json_value *v)
 {
     assert(v);
@@ -382,7 +441,7 @@ char *json_get_string(const json_value *v)
 size_t json_get_string_length(const json_value *v)
 {
     assert(v && v->type == JSON_STRING);
-    return v->len;
+    return v->string_len;
 }
 
 json_value *json_get_array_element(const json_value *v, size_t i)
@@ -394,9 +453,61 @@ json_value *json_get_array_element(const json_value *v, size_t i)
 size_t json_get_array_size(const json_value *v)
 {
     assert(v && v->type == JSON_ARRAY);
-    return v->size;
+    return v->array_size;
 }
 
-json_value *json_get_object_item(const json_value *v, const char *name)
+size_t json_get_object_size(const json_value *v)
 {
+    assert(v && v->type == JSON_OBJECT);
+    return v->object_size;
+}
+
+#define ASSERT_VALID_OBJECT_INDEX(v, index) \
+    do { \
+        assert(v && v->type == JSON_OBJECT && index >= 0 && index < v->object_size); \
+    } while (0)
+
+#define NTH_OBJECT(o, v, index) \
+    do { \
+        o = v->object; \
+        for (; index > 0; index--) \
+            o = o->next; \
+    } while (0)
+
+const char *json_get_object_key(const json_value *v, size_t index)
+{
+    json_object *o;
+
+    ASSERT_VALID_OBJECT_INDEX(v, index);
+    NTH_OBJECT(o, v, index);
+    return o->key;
+}
+
+size_t json_get_object_key_length(const json_value *v, size_t index)
+{
+    json_object *o;
+
+    ASSERT_VALID_OBJECT_INDEX(v, index);
+    NTH_OBJECT(o, v, index);
+    return o->key_len;
+}
+
+json_value *json_get_object_value_index(const json_value *v, size_t index)
+{
+    json_object *o;
+
+    ASSERT_VALID_OBJECT_INDEX(v, index);
+    NTH_OBJECT(o, v, index);
+    return &o->value;
+}
+
+json_value *json_get_object_value_n(const json_value *v, const char *key, size_t len)
+{
+    json_object *o;
+
+    assert(v && v->type == JSON_OBJECT && key);
+    for (o = v->object; o; o = o->next)
+        if (len == o->key_len && !memcmp(key, o->key, len))
+            return &o->value;
+    return NULL;
 }

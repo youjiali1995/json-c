@@ -21,6 +21,7 @@ static int test_pass = 0;
 /* Must not use strcmp to compare strings, because '\0' is a valid UNICODE character */
 #define ASSERT_EQ_STRING(expect, actual, length) \
     ASSERT_EQ_BASE(sizeof(expect) - 1 == length && !memcmp(expect, actual, length), expect, actual, "%s")
+#define ASSERT_EQ_POINTER(expect, actual) ASSERT_EQ_BASE((expect) == (actual), expect, actual, "%p")
 
 #define TEST_PARSE_RESULT(result, type, json) \
     do { \
@@ -138,6 +139,71 @@ static void test_parse_array(void)
     json_free(&v);
 }
 
+static void test_parse_object(void)
+{
+    json_value v;
+    size_t i;
+
+    ASSERT_EQ_INT(JSON_PARSE_OK, json_parse(&v,
+        "{"
+            "\"null\" : null,"
+            "\"true\" : true,"
+            "\"false\" : false,"
+            "\"number\" : 0,"
+            "\"string\" : \"abc\","
+            "\"array\" : [0, 1, 2],"
+            "\"object\" : { \"0\": 0, \"1\": 1, \"2\": 2}"
+        "}"
+    ));
+    ASSERT_EQ_INT(JSON_OBJECT, json_get_type(&v));
+    ASSERT_EQ_SIZE_T(7, json_get_object_size(&v));
+    ASSERT_EQ_STRING("null", json_get_object_key(&v, 0), json_get_object_key_length(&v, 0));
+    ASSERT_EQ_INT(JSON_NULL, json_get_type(json_get_object_value_index(&v, 0)));
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 0), json_get_object_value(&v, "null"));
+
+    ASSERT_EQ_STRING("true", json_get_object_key(&v, 1), json_get_object_key_length(&v, 1));
+    ASSERT_EQ_INT(JSON_TRUE, json_get_type(json_get_object_value_index(&v, 1)));
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 1), json_get_object_value(&v, "true"));
+
+    ASSERT_EQ_STRING("false", json_get_object_key(&v, 2), json_get_object_key_length(&v, 2));
+    ASSERT_EQ_INT(JSON_FALSE, json_get_type(json_get_object_value_index(&v, 2)));
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 2), json_get_object_value(&v, "false"));
+
+    ASSERT_EQ_STRING("number", json_get_object_key(&v, 3), json_get_object_key_length(&v, 3));
+    ASSERT_EQ_INT(JSON_NUMBER, json_get_type(json_get_object_value_index(&v, 3)));
+    ASSERT_EQ_DOUBLE(0.0, json_get_number(json_get_object_value_index(&v, 3)));
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 3), json_get_object_value(&v, "number"));
+
+    ASSERT_EQ_STRING("string", json_get_object_key(&v, 4), json_get_object_key_length(&v, 4));
+    ASSERT_EQ_INT(JSON_STRING, json_get_type(json_get_object_value_index(&v, 4)));
+    ASSERT_EQ_STRING("abc", json_get_string(json_get_object_value_index(&v, 4)), json_get_string_length(json_get_object_value_index(&v, 4)));
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 4), json_get_object_value(&v, "string"));
+
+    ASSERT_EQ_STRING("array", json_get_object_key(&v, 5), json_get_object_key_length(&v, 5));
+    ASSERT_EQ_INT(JSON_ARRAY, json_get_type(json_get_object_value_index(&v, 5)));
+    ASSERT_EQ_SIZE_T(3, json_get_array_size(json_get_object_value_index(&v, 5)));
+    for (i = 0; i < 3; i++) {
+        json_value *e = json_get_array_element(json_get_object_value_index(&v, 5), i);
+        ASSERT_EQ_INT(JSON_NUMBER, json_get_type(e));
+        ASSERT_EQ_DOUBLE(i, json_get_number(e));
+    }
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 5), json_get_object_value(&v, "array"));
+
+    ASSERT_EQ_STRING("object", json_get_object_key(&v, 6), json_get_object_key_length(&v, 6));
+    {
+        json_value *o = json_get_object_value_index(&v, 6);
+        ASSERT_EQ_INT(JSON_OBJECT, json_get_type(o));
+        for (i = 0; i < 3; i++) {
+            ASSERT_EQ_INT('0' + i, json_get_object_key(o, i)[0]);
+            ASSERT_EQ_SIZE_T(1, json_get_object_key_length(o, i));
+            ASSERT_EQ_INT(JSON_NUMBER, json_get_type(json_get_object_value_index(o, i)));
+            ASSERT_EQ_DOUBLE(i, json_get_number(json_get_object_value_index(o, i)));
+        }
+    }
+    ASSERT_EQ_POINTER(json_get_object_value_index(&v, 6), json_get_object_value(&v, "object"));
+    json_free(&v);
+}
+
 static void test_parse_error(void)
 {
     /* Literal */
@@ -174,16 +240,36 @@ static void test_parse_error(void)
     TEST_PARSE_ERROR("\"\\uD8FF\"");
     TEST_PARSE_ERROR("\"\\uD800\\uDBFF\"");
     TEST_PARSE_ERROR("\"\\uD800\\uE000\"");
+    /* Array */
     TEST_PARSE_ERROR("[");
     TEST_PARSE_ERROR("]");
     TEST_PARSE_ERROR("[1,]");
     TEST_PARSE_ERROR("[,]");
     TEST_PARSE_ERROR("[1 2]");
+    /* Object */
+    TEST_PARSE_ERROR("{");
+    TEST_PARSE_ERROR("}");
+    TEST_PARSE_ERROR("{\"1\"}");
+    TEST_PARSE_ERROR("{\"1\":}");
+    TEST_PARSE_ERROR("{1}");
+    TEST_PARSE_ERROR("{:1}");
+    TEST_PARSE_ERROR("{1: 1}");
+    TEST_PARSE_ERROR("{null: 1}");
+    TEST_PARSE_ERROR("{true: 1}");
+    TEST_PARSE_ERROR("{false: 1}");
+    TEST_PARSE_ERROR("{[]: 1}");
+    TEST_PARSE_ERROR("{{}: 1}");
+    TEST_PARSE_ERROR("{\"1\"}");
+    TEST_PARSE_ERROR("{\"1\":}");
+    TEST_PARSE_ERROR("{\"1\" 1}");
+    TEST_PARSE_ERROR("{\"1\": 1");
+    TEST_PARSE_ERROR("{\"1\": \"1}");
 }
 
 static void test_free(void)
 {
     json_value v;
+
     json_init(&v);
     ASSERT_EQ_INT(JSON_PARSE_OK, json_parse(&v, "\"hello\""));
     ASSERT_EQ_INT(JSON_STRING, json_get_type(&v));
@@ -199,6 +285,7 @@ static void test(void)
     test_parse_number();
     test_parse_string();
     test_parse_array();
+    test_parse_object();
     test_parse_error();
     test_free();
 }
