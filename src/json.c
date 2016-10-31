@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h> /* errno, ERANGE */
 #include <math.h> /* HUGE_VAL */
+#include <stdio.h>
 #include "json.h"
 
 #define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
@@ -137,7 +138,7 @@ static const char *json_parse_hex4(const char *p, unsigned *u)
         else
             return NULL;
     }
-    return p + 4;
+    return p + 3;
 }
 
 static void json_encode_utf8(json_context *c, unsigned u)
@@ -212,14 +213,13 @@ static char *json_generate_string(json_context *c, size_t *len)
                 }
                 if (hex >= 0xD800 && hex <= 0xDBFF) {
                     unsigned u;
-                    if (*p++ != '\\' || *p++ != 'u' || !(p = json_parse_hex4(p, &u)) || !(u >= 0xDC00 && u <= 0xDFFF)) {
+                    if (*++p != '\\' || *++p != 'u' || !(p = json_parse_hex4(++p, &u)) || !(u >= 0xDC00 && u <= 0xDFFF)) {
                         c->top = head;
                         return NULL;
                     }
                     hex = 0x10000 + ((hex - 0xD800) << 10) + (u - 0xDC00);
                 }
                 json_encode_utf8(c, hex);
-                p--;
                 break;
 
             default:
@@ -375,7 +375,6 @@ int json_parse(json_value *v, const char *json)
     json_context c;
 
     assert(v && json);
-    json_init(v);
     json_context_init(&c, json);
     json_parse_whitespace(&c);
     if ((ret = json_parse_value(&c, v)) == JSON_PARSE_OK) {
@@ -418,6 +417,171 @@ void json_free(json_value *v)
         break;
     }
     v->type = JSON_NULL;
+}
+
+static const char *json_jsonify_hex(const char *p, unsigned *hex)
+{
+    *hex = 0;
+    if ((*p & 0xE0) == 0xC0) {
+        *hex |= (*p++ & 0x1F) << 6;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p & 0x3F);
+    } else if ((*p & 0xF0) == 0xE0) {
+        *hex |= (*p++ & 0x0F) << 12;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p++ & 0x3F) << 6;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p & 0x3F);
+    } else if ((*p & 0xF8) == 0xF0) {
+        *hex |= (*p++ & 0x07) << 18;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p++ & 0x3F) << 12;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p++ & 0x3F) << 6;
+        if ((*p & 0xC0) != 0x80)
+            return NULL;
+        *hex |= (*p & 0x3F);
+    } else
+        return NULL;
+    return p;
+}
+
+static void json_htos(json_context *c, unsigned hex)
+{
+    char s[4];
+    size_t i;
+
+    json_context_push(c, "\\u", 2);
+    /* unsigned underflow */
+    for (i = 4; i > 0; i--) {
+        s[i - 1] = "0123456789ABCDEF"[hex & 0xF];
+        hex >>= 4;
+    }
+    json_context_push(c, s, 4);
+}
+
+static void json_decode_utf8(json_context *c, unsigned codepoint)
+{
+    if (codepoint < 0x10000)
+        json_htos(c, codepoint);
+    else {
+        unsigned low, high;
+        codepoint -= 0x10000;
+        high = 0xD800 + (codepoint >> 10);
+        low = 0xDC00 + (codepoint & 0x3FF);
+        json_htos(c, high);
+        json_htos(c, low);
+    }
+}
+
+static int json_jsonify_string(json_context *c, const json_value *v)
+{
+    size_t head = c->top;
+    const char *p, *end;
+
+    assert(v->type == JSON_STRING);
+    PUTC(c, '\"');
+    for (p = v->string, end = v->string + v->string_len; p < end; p++)
+        switch (*p) {
+        case '\b':
+            json_context_push(c, "\\b", 2);
+            break;
+        case '\f':
+            json_context_push(c, "\\f", 2);
+            break;
+        case '\n':
+            json_context_push(c, "\\n", 2);
+            break;
+        case '\r':
+            json_context_push(c, "\\r", 2);
+            break;
+        case '\t':
+            json_context_push(c, "\\t", 2);
+            break;
+        case '\"':
+            json_context_push(c, "\\\"", 2);
+            break;
+        case '/':
+            json_context_push(c, "\\/", 2);
+            break;
+        case '\\':
+            json_context_push(c, "\\\\", 2);
+            break;
+        default:
+            if (*p & 0x80) {
+                unsigned codepoint;
+                if (!(p = json_jsonify_hex(p, &codepoint)) || codepoint > 0x10FFFF) {
+                    c->top == head;
+                    return JSON_JSONIFY_ERROR;
+                }
+                json_decode_utf8(c, codepoint);
+            } else
+                PUTC(c, *p);
+            break;
+        }
+    PUTC(c, '\"');
+    return JSON_JSONIFY_OK;
+}
+
+static int json_jsonify_number(json_context *c, const json_value *v)
+{
+    char d[50];
+    int len;
+
+    assert(v->type == JSON_NUMBER);
+    if ((len = snprintf(d, 50, "%.17g", v->number)) < 0)
+        return JSON_JSONIFY_ERROR;
+    json_context_push(c, d, len);
+    return JSON_JSONIFY_OK;
+}
+
+static int json_jsonify_value(json_context *c, const json_value *v)
+{
+    switch (v->type) {
+    case JSON_NULL:
+        json_context_push(c, "null", 4);
+        break;
+    case JSON_TRUE:
+        json_context_push(c, "true", 4);
+        break;
+    case JSON_FALSE:
+        json_context_push(c, "false", 5);
+        break;
+    case JSON_STRING:
+        return json_jsonify_string(c, v);
+    case JSON_NUMBER:
+        return json_jsonify_number(c, v);
+    default:
+        return JSON_JSONIFY_ERROR;
+    }
+    return JSON_JSONIFY_OK;
+}
+
+char *json_jsonify(const json_value *v, size_t *len)
+{
+    json_context c;
+    char *json;
+
+    assert(v);
+    json_context_init(&c, NULL);
+    if (json_jsonify_value(&c, v) == JSON_JSONIFY_OK) {
+        if (len)
+            *len = c.top;
+        json = (char *) malloc(*len + 1);
+        memcpy(json, json_context_pop(&c, c.top), c.top);
+        json[*len] = '\0';
+    } else {
+        if (len)
+            *len = 0;
+        json = NULL;
+    }
+    json_context_free(&c);
+    return json;
 }
 
 int json_get_type(const json_value *v)
@@ -510,4 +674,40 @@ json_value *json_get_object_value_n(const json_value *v, const char *key, size_t
         if (len == o->key_len && !memcmp(key, o->key, len))
             return &o->value;
     return NULL;
+}
+
+void json_set_null(json_value *v)
+{
+    assert(v);
+    v->type = JSON_NULL;
+}
+
+void json_set_true(json_value *v)
+{
+    assert(v);
+    v->type = JSON_TRUE;
+}
+
+void json_set_false(json_value *v)
+{
+    assert(v);
+    v->type = JSON_FALSE;
+}
+
+/* no validation checking */
+void json_set_string(json_value *v, const char *string, size_t len)
+{
+    assert(v && string && len >= 0);
+    v->type = JSON_STRING;
+    v->string_len = len;
+    v->string = (char *) malloc(len + 1);
+    memcpy(v->string, string, len);
+    v->string[len] = '\0';
+}
+
+void json_set_number(json_value *v, double number)
+{
+    assert(v);
+    v->type = JSON_NUMBER;
+    v->number = number;
 }

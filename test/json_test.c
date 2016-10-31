@@ -91,7 +91,6 @@ static void test_parse_string(void)
     TEST_PARSE_STRING("", "\"\"");
     TEST_PARSE_STRING("hello, world", "\"hello, world\"");
     TEST_PARSE_STRING("hello\0world", "\"hello\\u0000world\"");
-    TEST_PARSE_STRING("\t", "\"\\t\"");
     TEST_PARSE_STRING("\\", "\"\\\\\"");
     TEST_PARSE_STRING("/", "\"\\/\"");
     TEST_PARSE_STRING("\b", "\"\\b\"");
@@ -144,6 +143,7 @@ static void test_parse_object(void)
     json_value v;
     size_t i;
 
+    json_init(&v);
     ASSERT_EQ_INT(JSON_PARSE_OK, json_parse(&v,
         "{"
             "\"null\" : null,"
@@ -277,6 +277,99 @@ static void test_free(void)
     ASSERT_EQ_INT(JSON_NULL, json_get_type(&v));
 }
 
+#define TEST_JSONIFY_OK(expect, v) \
+    do { \
+        char *p; \
+        size_t len; \
+        p = json_jsonify(v, &len); \
+        ASSERT_EQ_STRING(expect, p, len); \
+        free(p); \
+        json_free(v); \
+    } while (0)
+
+#define TEST_JSONIFY_ERROR(v) \
+    do { \
+        char *p; \
+        p = json_jsonify(v, NULL); \
+        ASSERT_EQ_POINTER(NULL, p); \
+        free(p); \
+        json_free(v); \
+    } while (0)
+
+#define TEST_JSONIFY_STRING(expect, string, len) \
+    do { \
+        json_value v; \
+        json_init(&v); \
+        json_set_string(&v, string, len); \
+        TEST_JSONIFY_OK(expect, &v); \
+    } while (0)
+
+#define TEST_JSONIFY_NUMBER(expect, number) \
+    do { \
+        json_value v; \
+        json_init(&v); \
+        json_set_number(&v, number); \
+        TEST_JSONIFY_OK(expect, &v); \
+    } while (0)
+
+#define TEST_JSONIFY_STRING_ERROR(string, len) \
+    do { \
+        json_value v; \
+        json_init(&v); \
+        json_set_string(&v, string, len); \
+        TEST_JSONIFY_ERROR(&v); \
+    } while (0)
+
+static void test_jsonify_null(void)
+{
+    json_value v;
+    json_init(&v);
+    json_set_null(&v);
+    TEST_JSONIFY_OK("null", &v);
+}
+
+static void test_jsonify_true(void)
+{
+    json_value v;
+    json_init(&v);
+    json_set_true(&v);
+    TEST_JSONIFY_OK("true", &v);
+}
+
+static void test_jsonify_false(void)
+{
+    json_value v;
+    json_init(&v);
+    json_set_false(&v);
+    TEST_JSONIFY_OK("false", &v);
+}
+
+static void test_jsonify_string(void)
+{
+    TEST_JSONIFY_STRING("\"\"", "", 0);
+    TEST_JSONIFY_STRING("\"hello, world!\"", "hello, world!", 13);
+    TEST_JSONIFY_STRING("\"\\b \\f \\n \\r \\t \\\" \\/ \\\\\"", "\b \f \n \r \t \" / \\", 15);
+    TEST_JSONIFY_STRING("\"\0\"", "\0", 1);
+    TEST_JSONIFY_STRING("\"\\u00A2\"", "\xC2\xA2", 2);
+    TEST_JSONIFY_STRING("\"\\u20AC\"", "\xE2\x82\xAC", 3);
+    TEST_JSONIFY_STRING("\"\\uD834\\uDD1E\"", "\xF0\x9D\x84\x9E", 4);
+}
+
+static void test_jsonify_number(void)
+{
+    TEST_JSONIFY_NUMBER("1", 1.0);
+    TEST_JSONIFY_NUMBER("1.234", 1.234);
+    TEST_JSONIFY_NUMBER("10000000000", 1e+10);
+}
+
+static void test_jsonify_error(void)
+{
+    TEST_JSONIFY_STRING_ERROR("\xC2", 1);
+    TEST_JSONIFY_STRING_ERROR("\xE2\x82", 2);
+    TEST_JSONIFY_STRING_ERROR("\xF0\x9D\x84", 3);
+    TEST_JSONIFY_STRING_ERROR("\xFF\xFF\xFF\xFF", 4);
+}
+
 static void test(void)
 {
     test_parse_true();
@@ -287,7 +380,15 @@ static void test(void)
     test_parse_array();
     test_parse_object();
     test_parse_error();
+
     test_free();
+
+    test_jsonify_true();
+    test_jsonify_false();
+    test_jsonify_null();
+    test_jsonify_string();
+    test_jsonify_number();
+    test_jsonify_error();
 }
 
 int main(void)

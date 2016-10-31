@@ -11,7 +11,7 @@ typedef enum json_type {
     JSON_ARRAY,
     JSON_TRUE,
     JSON_FALSE,
-    JSON_NULL,
+    JSON_NULL
 } json_type;
 
 typedef struct json_value json_value;
@@ -49,15 +49,23 @@ struct json_object {
 
 enum {
     JSON_PARSE_OK,
-    JSON_PARSE_ERROR
+    JSON_PARSE_ERROR,
+    JSON_JSONIFY_OK,
+    JSON_JSONIFY_ERROR
 };
 
 void json_init(json_value *v);
 
-int json_parse(json_value *v, const char *json);
-
 void json_free(json_value *v);
 
+/* parse */
+int json_parse(json_value *v, const char *json);
+
+/* jsonify */
+char *json_jsonify(const json_value *v, size_t *len);
+
+/* access functions */
+/* get */
 int json_get_type(const json_value *v);
 
 double json_get_number(const json_value *v);
@@ -81,5 +89,16 @@ json_value *json_get_object_value_index(const json_value *v, size_t index);
 #define json_get_object_value(v, key) json_get_object_value_n(v, key, sizeof(key) - 1)
 
 json_value *json_get_object_value_n(const json_value *v, const char *key, size_t len);
+
+/* set */
+void json_set_null(json_value *v);
+
+void json_set_true(json_value *v);
+
+void json_set_false(json_value *v);
+
+void json_set_string(json_value *v, const char *string, size_t len);
+
+void json_set_number(json_value *v, double number);
 
 #endif /* JSON_H__ */
