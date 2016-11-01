@@ -101,4 +101,8 @@ void json_set_string(json_value *v, const char *string, size_t len);
 
 void json_set_number(json_value *v, double number);
 
+void json_set_array(json_value *v, int deepcopy, ...);
+
+void json_object_append(json_value *v, int deepcopy, ...);
+
 #endif /* JSON_H__ */

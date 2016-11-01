@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h> /* errno, ERANGE */
 #include <math.h> /* HUGE_VAL */
+#include <stdarg.h>
 #include <stdio.h>
 #include "json.h"
 
@@ -422,7 +423,9 @@ void json_free(json_value *v)
 static const char *json_jsonify_hex(const char *p, unsigned *hex)
 {
     *hex = 0;
-    if ((*p & 0xE0) == 0xC0) {
+    if ((*p & 0x80) == 0)
+        *hex = (unsigned) *p;
+    else if ((*p & 0xE0) == 0xC0) {
         *hex |= (*p++ & 0x1F) << 6;
         if ((*p & 0xC0) != 0x80)
             return NULL;
@@ -457,7 +460,7 @@ static void json_htos(json_context *c, unsigned hex)
     size_t i;
 
     json_context_push(c, "\\u", 2);
-    /* unsigned underflow */
+    /* underflow if use "for (i = 3; i >= 0; i--)" */
     for (i = 4; i > 0; i--) {
         s[i - 1] = "0123456789ABCDEF"[hex & 0xF];
         hex >>= 4;
@@ -513,10 +516,10 @@ static int json_jsonify_string(json_context *c, const json_value *v)
             json_context_push(c, "\\\\", 2);
             break;
         default:
-            if (*p & 0x80) {
+            if (*p & 0x80 || *p < '\x20') {
                 unsigned codepoint;
                 if (!(p = json_jsonify_hex(p, &codepoint)) || codepoint > 0x10FFFF) {
-                    c->top == head;
+                    c->top = head;
                     return JSON_JSONIFY_ERROR;
                 }
                 json_decode_utf8(c, codepoint);
@@ -532,11 +535,57 @@ static int json_jsonify_number(json_context *c, const json_value *v)
 {
     char d[50];
     int len;
+    size_t head = c->top;
 
     assert(v->type == JSON_NUMBER);
-    if ((len = snprintf(d, 50, "%.17g", v->number)) < 0)
+    if ((len = snprintf(d, 50, "%.17g", v->number)) < 0) {
+        c->top = head;
         return JSON_JSONIFY_ERROR;
+    }
     json_context_push(c, d, len);
+    return JSON_JSONIFY_OK;
+}
+static int json_jsonify_value(json_context *c, const json_value *v);
+
+static int json_jsonify_array(json_context *c, const json_value *v)
+{
+    size_t head = c->top;
+    size_t i;
+
+    assert(v->type == JSON_ARRAY);
+    PUTC(c, '[');
+    for (i = 0; i < v->array_size; i++) {
+        if (json_jsonify_value(c, v->array + i) == JSON_JSONIFY_ERROR) {
+            c->top = head;
+            return JSON_JSONIFY_ERROR;
+        }
+        if (i != v->array_size - 1)
+            json_context_push(c, ", ", 2);
+    }
+    PUTC(c, ']');
+    return JSON_JSONIFY_OK;
+}
+
+static int json_jsonify_object(json_context *c, const json_value *v)
+{
+    size_t head = c->top;
+    json_object *p;
+
+    assert(v->type == JSON_OBJECT);
+    PUTC(c, '{');
+    for (p = v->object; p; p = p->next) {
+        PUTC(c, '\"');
+        json_context_push(c, p->key, p->key_len);
+        PUTC(c, '\"');
+        json_context_push(c, ": ", 2);
+        if (json_jsonify_value(c, &p->value) == JSON_JSONIFY_ERROR) {
+            c->top = head;
+            return JSON_JSONIFY_ERROR;
+        }
+        if (p->next)
+            json_context_push(c, ", ", 2);
+    }
+    PUTC(c, '}');
     return JSON_JSONIFY_OK;
 }
 
@@ -556,6 +605,10 @@ static int json_jsonify_value(json_context *c, const json_value *v)
         return json_jsonify_string(c, v);
     case JSON_NUMBER:
         return json_jsonify_number(c, v);
+    case JSON_ARRAY:
+        return json_jsonify_array(c, v);
+    case JSON_OBJECT:
+        return json_jsonify_object(c, v);
     default:
         return JSON_JSONIFY_ERROR;
     }
@@ -710,4 +763,135 @@ void json_set_number(json_value *v, double number)
     assert(v);
     v->type = JSON_NUMBER;
     v->number = number;
+}
+
+static json_object *json_object_deepcopy(const json_object *o);
+
+static json_value *json_value_deepcopy(const json_value *v)
+{
+    json_value *copy;
+    size_t i;
+
+    assert(v);
+    copy = (json_value *) malloc(sizeof(json_value));
+    switch (v->type) {
+    case JSON_NULL:
+    case JSON_TRUE:
+    case JSON_FALSE:
+        copy->type = v->type;
+        break;
+    case JSON_STRING:
+        json_set_string(copy, v->string, v->string_len);
+        break;
+    case JSON_NUMBER:
+        copy->type = JSON_NUMBER;
+        copy->number = v->number;
+        break;
+    case JSON_ARRAY:
+        copy->type = JSON_ARRAY;
+        copy->array_size = v->array_size;
+        copy->array = (json_value *) malloc(sizeof(json_value) * v->array_size);
+        for (i = 0; i < v->array_size; i++) {
+            json_value *e = json_value_deepcopy(v->array + i);
+            memcpy(copy->array + i, e, sizeof(json_value));
+            free(e);
+        }
+        break;
+    case JSON_OBJECT:
+    {
+        json_object **o, *p;
+        copy->type = JSON_OBJECT;
+        copy->object_size = v->object_size;
+        for (o = &copy->object, p = v->object; p; o = &(*o)->next, p = p->next)
+            *o = json_object_deepcopy(p);
+        *o = NULL;
+        break;
+    }
+    default:
+        free(copy);
+        assert(0);
+        return NULL;
+    }
+    return copy;
+}
+
+static json_object *json_object_deepcopy(const json_object *o)
+{
+    json_object *copy;
+    json_value *value;
+
+    assert(o);
+    copy = (json_object *) malloc(sizeof(json_object));
+    copy->key_len = o->key_len;
+    copy->key = (char *) malloc(o->key_len + 1);
+    memcpy(copy->key, o->key, o->key_len);
+    copy->key[o->key_len] = '\0';
+    value = json_value_deepcopy(&o->value);
+    memcpy(&copy->value, value, sizeof(json_value));
+    free(value);
+    copy->next = o->next;
+    return copy;
+}
+
+void json_set_array(json_value *v, int deepcopy, ...)
+{
+    va_list ap;
+    json_context c;
+    json_value *e;
+
+    assert(v);
+    json_context_init(&c, NULL);
+    v->type = JSON_ARRAY;
+    v->array_size = 0;
+    va_start(ap, deepcopy);
+    /* Deepcopy vs Shadowcopy */
+    for (e = va_arg(ap, json_value *); e != NULL; e = va_arg(ap, json_value *)) {
+        if (deepcopy)
+            e = json_value_deepcopy(e);
+        json_context_push(&c, e, sizeof(json_value));
+        v->array_size++;
+        if (deepcopy)
+            free(e);
+    }
+    v->array = (json_value *) malloc(sizeof(json_value) * v->array_size);
+    memcpy(v->array, json_context_pop(&c, c.top), c.top);
+    json_context_free(&c);
+    va_end(ap);
+}
+
+void json_object_append(json_value *v, int deepcopy, ...)
+{
+    va_list ap;
+    json_object **p;
+    char *key;
+
+    assert(v);
+    if (v->type != JSON_OBJECT) {
+        v->type = JSON_OBJECT;
+        v->object_size = 0;
+        p = &v->object;
+    } else
+        for (p = &v->object; *p; p = &(*p)->next)
+            ;
+    va_start(ap, deepcopy);
+    for (key = va_arg(ap, char *); key; key = va_arg(ap, char *)) {
+        size_t key_len = va_arg(ap, size_t);
+        json_value *value = va_arg(ap, json_value *);
+
+        *p = (json_object *) malloc(sizeof(json_object));
+        (*p)->key = (char *) malloc(key_len + 1);
+        memcpy((*p)->key, key, key_len);
+        (*p)->key_len = key_len;
+        (*p)->key[key_len] = '\0';
+        if (deepcopy) {
+            value = json_value_deepcopy(value);
+            memcpy(&(*p)->value, value, sizeof(json_value));
+            free(value);
+        } else
+            memcpy(&(*p)->value, value, sizeof(json_value));
+        p = &(*p)->next;
+        v->object_size++;
+    }
+    *p = NULL;
+    va_end(ap);
 }

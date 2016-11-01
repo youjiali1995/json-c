@@ -152,7 +152,7 @@ static void test_parse_object(void)
             "\"number\" : 0,"
             "\"string\" : \"abc\","
             "\"array\" : [0, 1, 2],"
-            "\"object\" : { \"0\": 0, \"1\": 1, \"2\": 2}"
+            "\"object\" : {\"0\": 0, \"1\": 1, \"2\": 2}"
         "}"
     ));
     ASSERT_EQ_INT(JSON_OBJECT, json_get_type(&v));
@@ -349,7 +349,7 @@ static void test_jsonify_string(void)
     TEST_JSONIFY_STRING("\"\"", "", 0);
     TEST_JSONIFY_STRING("\"hello, world!\"", "hello, world!", 13);
     TEST_JSONIFY_STRING("\"\\b \\f \\n \\r \\t \\\" \\/ \\\\\"", "\b \f \n \r \t \" / \\", 15);
-    TEST_JSONIFY_STRING("\"\0\"", "\0", 1);
+    TEST_JSONIFY_STRING("\"\\u0000\"", "\0", 1);
     TEST_JSONIFY_STRING("\"\\u00A2\"", "\xC2\xA2", 2);
     TEST_JSONIFY_STRING("\"\\u20AC\"", "\xE2\x82\xAC", 3);
     TEST_JSONIFY_STRING("\"\\uD834\\uDD1E\"", "\xF0\x9D\x84\x9E", 4);
@@ -360,6 +360,182 @@ static void test_jsonify_number(void)
     TEST_JSONIFY_NUMBER("1", 1.0);
     TEST_JSONIFY_NUMBER("1.234", 1.234);
     TEST_JSONIFY_NUMBER("10000000000", 1e+10);
+}
+
+static void test_jsonify_array(void)
+{
+    json_value v, e;
+
+    json_init(&v);
+    json_set_array(&v, 0, NULL);
+    TEST_JSONIFY_OK("[]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_null(&e);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[null]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_true(&e);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[true]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_false(&e);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[false]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_string(&e, "hello, world!", 13);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[\"hello, world!\"]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_number(&e, 1.23);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[1.23]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_set_array(&e, 0, NULL);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[[]]", &v);
+
+    json_init(&v);
+    json_init(&e);
+    json_object_append(&e, 0, NULL);
+    json_set_array(&v, 0, &e, NULL);
+    TEST_JSONIFY_OK("[{}]", &v);
+
+    {
+        json_value n, t, f, s, d, a, o;
+
+        json_init(&n);
+        json_set_null(&n);
+        json_init(&t);
+        json_set_true(&t);
+        json_init(&f);
+        json_set_false(&f);
+        json_init(&s);
+        json_set_string(&s, "hello, world!", 13);
+        json_init(&d);
+        json_set_number(&d, 0);
+        json_init(&a);
+        json_set_array(&a, 0, &d, NULL);
+        json_init(&o);
+        json_object_append(&o, 0, "0", 1, &d, NULL);
+        json_init(&v);
+        json_set_array(&v, 0, &n, &t, &f, &s, &d, &a, &o, NULL);
+        TEST_JSONIFY_OK("[null, true, false, \"hello, world!\", 0, [0], {\"0\": 0}]", &v);
+    }
+
+    /* Shadow copy */
+    {
+        json_value s;
+
+        json_init(&v);
+        json_init(&s);
+        json_set_string(&s, "Shadow copy", 11);
+        json_set_array(&v, 0, &s, NULL);
+        s.string[0] = 's';
+        TEST_JSONIFY_OK("[\"shadow copy\"]", &v);
+    }
+
+    /* Deepcopy */
+    {
+        json_value *n, *t, *f, *s, *d, *a, *o;
+
+        n = (json_value *) malloc(sizeof(json_value));
+        t = (json_value *) malloc(sizeof(json_value));
+        f = (json_value *) malloc(sizeof(json_value));
+        s = (json_value *) malloc(sizeof(json_value));
+        d = (json_value *) malloc(sizeof(json_value));
+        a = (json_value *) malloc(sizeof(json_value));
+        o = (json_value *) malloc(sizeof(json_value));
+        json_init(n);
+        json_set_null(n);
+        json_init(t);
+        json_set_true(t);
+        json_init(f);
+        json_set_false(f);
+        json_init(s);
+        json_set_string(s, "hello, world!", 13);
+        json_init(d);
+        json_set_number(d, 0);
+        json_init(a);
+        json_set_array(a, 0, d, NULL);
+        json_init(o);
+        json_object_append(o, 0, "0", 1, d, NULL);
+        json_init(&v);
+        json_set_array(&v, 1, n, t, f, s, d, a, o, NULL);
+        json_free(n);
+        json_free(t);
+        json_free(f);
+        json_free(s);
+        json_free(d);
+        json_free(a);
+        json_free(o);
+        free(n);
+        free(t);
+        free(f);
+        free(s);
+        free(d);
+        free(a);
+        free(o);
+        TEST_JSONIFY_OK("[null, true, false, \"hello, world!\", 0, [0], {\"0\": 0}]", &v);
+    }
+}
+
+static void test_jsonify_object(void)
+{
+    json_value v;
+
+    json_init(&v);
+    json_object_append(&v, 0, NULL);
+    TEST_JSONIFY_OK("{}", &v);
+
+    {
+        json_value n, t, f, s, d, a, o;
+
+        json_init(&n);
+        json_set_null(&n);
+        json_init(&t);
+        json_set_true(&t);
+        json_init(&f);
+        json_set_false(&f);
+        json_init(&s);
+        json_set_string(&s, "hello, world!", 13);
+        json_init(&d);
+        json_set_number(&d, 0);
+        json_init(&a);
+        json_set_array(&a, 0, &d, NULL);
+        json_init(&o);
+        json_object_append(&o, 0, "0", 1, &d, NULL);
+        json_init(&v);
+        json_object_append(&v, 0, "o", 1, &n, "n", 1, &n, NULL);
+        //json_object_append(&v, 0, "null", 4, &n, "true", 4, &t, "false", 5, &f, "string", 6, &s, "number", 6, &d, "array", 5, &a, "object", 6, &o, NULL);
+        //TEST_JSONIFY_OK("{\"null\": null, \"true\": true, \"false\": false, \"string\": \"hello, world!\", \"number\": 0, \"array\": [0], \"object\": {\"0\": 0}}", &v);
+    }
+
+    {
+        json_value e;
+
+        json_init(&e);
+        json_set_string(&e, "hello", 5);
+        json_init(&v);
+        json_object_append(&v, 1, "1", 1, &e, NULL);
+        json_free(&e);
+        json_init(&e);
+        json_set_string(&e, "world", 5);
+        json_object_append(&v, 1, "2", 1, &e, NULL);
+        json_free(&e);
+        TEST_JSONIFY_OK("{\"1\": \"hello\", \"2\": \"world\"}", &v);
+    }
 }
 
 static void test_jsonify_error(void)
@@ -388,6 +564,8 @@ static void test(void)
     test_jsonify_null();
     test_jsonify_string();
     test_jsonify_number();
+    test_jsonify_array();
+    test_jsonify_object();
     test_jsonify_error();
 }
 
