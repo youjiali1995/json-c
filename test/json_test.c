@@ -537,6 +537,40 @@ static void test_jsonify_object(void)
     }
 }
 
+static void test_modify_array(void)
+{
+    json_value a, e, *p;
+
+    json_init(&e);
+    json_set_true(&e);
+    json_init(&a);
+    json_set_array(&a, 0, &e, NULL);
+    json_free(&e);
+    p = json_get_array_element(&a, 0);
+    json_free(p);
+    json_init(p);
+    json_set_false(p);
+    TEST_JSONIFY_OK("[false]", &a);
+}
+
+static void test_modify_object(void)
+{
+    json_value o, t, *v;
+    char *k;
+
+    json_init(&t);
+    json_set_true(&t);
+    json_init(&o);
+    json_object_append(&o, 0, "true", (size_t) 4, &t, NULL);
+    k = json_get_object_key(&o, 0);
+    k[0] = 'T';
+    v = json_get_object_value(&o, "True");
+    json_free(v);
+    json_init(v);
+    json_set_false(v);
+    TEST_JSONIFY_OK("{\"True\": false}", &o);
+}
+
 static void test_jsonify_error(void)
 {
     TEST_JSONIFY_STRING_ERROR("\xC2", 1);
@@ -565,6 +599,8 @@ static void test(void)
     test_jsonify_number();
     test_jsonify_array();
     test_jsonify_object();
+    test_modify_array();
+    test_modify_object();
     test_jsonify_error();
 }
 
