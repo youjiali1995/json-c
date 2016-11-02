@@ -701,7 +701,7 @@ size_t json_get_object_size(const json_value *v)
             o = o->next; \
     } while (0)
 
-const char *json_get_object_key(const json_value *v, size_t index)
+char *json_get_object_key(const json_value *v, size_t index)
 {
     json_object *o;
 

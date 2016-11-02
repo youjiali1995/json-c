@@ -74,13 +74,13 @@ char *json_get_string(const json_value *v);
 
 size_t json_get_string_length(const json_value *v);
 
-json_value *json_get_array_element(const json_value *v, size_t i);
+json_value *json_get_array_element(const json_value *v, size_t index);
 
 size_t json_get_array_size(const json_value *v);
 
 size_t json_get_object_size(const json_value *v);
 
-const char *json_get_object_key(const json_value *v, size_t index);
+char *json_get_object_key(const json_value *v, size_t index);
 
 size_t json_get_object_key_length(const json_value *v, size_t index);
 
