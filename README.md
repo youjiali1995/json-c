@@ -48,6 +48,7 @@ int main(void)
     printf("%s\n", json);
     json_free(&s);
     json_free(&v);
+    free(json);
     return 0;
 }
 ```
