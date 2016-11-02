@@ -515,11 +515,10 @@ static void test_jsonify_object(void)
         json_init(&a);
         json_set_array(&a, 0, &d, NULL);
         json_init(&o);
-        json_object_append(&o, 0, "0", 1, &d, NULL);
+        json_object_append(&o, 0, "0", (size_t) 1, &d, NULL);
         json_init(&v);
-        json_object_append(&v, 0, "o", 1, &n, "n", 1, &n, NULL);
-        //json_object_append(&v, 0, "null", 4, &n, "true", 4, &t, "false", 5, &f, "string", 6, &s, "number", 6, &d, "array", 5, &a, "object", 6, &o, NULL);
-        //TEST_JSONIFY_OK("{\"null\": null, \"true\": true, \"false\": false, \"string\": \"hello, world!\", \"number\": 0, \"array\": [0], \"object\": {\"0\": 0}}", &v);
+        json_object_append(&v, 0, "null", (size_t) 4, &n, "true", (size_t) 4, &t, "false", (size_t) 5, &f, "string", (size_t) 6, &s, "number", (size_t) 6, &d, "array", (size_t) 5, &a, "object", (size_t) 6, &o, NULL);
+        TEST_JSONIFY_OK("{\"null\": null, \"true\": true, \"false\": false, \"string\": \"hello, world!\", \"number\": 0, \"array\": [0], \"object\": {\"0\": 0}}", &v);
     }
 
     {
