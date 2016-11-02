@@ -21,6 +21,12 @@
 #define json_parse_false(c, v) json_parse_literal(c, v, "false", JSON_FALSE)
 #define json_parse_null(c, v) json_parse_literal(c, v, "null", JSON_NULL)
 
+/* ***************************************Context***********************************************
+ * 'json_context' contains a 'json' string and a dynamic stack used to keep the trace of parsing and buffer temporary results.
+ *   1). When parsing, 'json' is a pointer to the next char for parsing, and 'stack' is a buffer to store the temporary results for parsing string and array.
+ *   2). When jsonifying, 'stack' is a buffer to store the temporary json string.
+ *   3). When setting json_value, 'stack' is a buffer to store the elements of array;
+ */
 typedef struct {
     const char *json;
     char *stack;
@@ -62,6 +68,7 @@ static void json_context_free(json_context *c)
     free(c->stack);
 }
 
+/* ********************************Parse******************************************* */
 static void json_parse_whitespace(json_context *c)
 {
     while (ISWHITESPACE(*c->json))
@@ -364,12 +371,7 @@ static int json_parse_value(json_context *c, json_value *v)
     }
 }
 
-void json_init(json_value *v)
-{
-    assert(v);
-    v->type = JSON_NULL;
-}
-
+/* Recursive descent parser */
 int json_parse(json_value *v, const char *json)
 {
     int ret;
@@ -387,6 +389,12 @@ int json_parse(json_value *v, const char *json)
     }
     json_context_free(&c);
     return ret;
+}
+
+void json_init(json_value *v)
+{
+    assert(v);
+    v->type = JSON_NULL;
 }
 
 void json_free(json_value *v)
@@ -420,7 +428,8 @@ void json_free(json_value *v)
     v->type = JSON_NULL;
 }
 
-static const char *json_jsonify_hex(const char *p, unsigned *hex)
+/* *******************************Jsonify*********************************** */
+static const char *json_decode_utf8_to_codepoint(const char *p, unsigned *hex)
 {
     *hex = 0;
     if ((*p & 0x80) == 0)
@@ -518,7 +527,7 @@ static int json_jsonify_string(json_context *c, const json_value *v)
         default:
             if (*p & 0x80 || *p < '\x20') {
                 unsigned codepoint;
-                if (!(p = json_jsonify_hex(p, &codepoint)) || codepoint > 0x10FFFF) {
+                if (!(p = json_decode_utf8_to_codepoint(p, &codepoint)) || codepoint > 0x10FFFF) {
                     c->top = head;
                     return JSON_JSONIFY_ERROR;
                 }
@@ -625,9 +634,9 @@ char *json_jsonify(const json_value *v, size_t *len)
     if (json_jsonify_value(&c, v) == JSON_JSONIFY_OK) {
         if (len)
             *len = c.top;
-        json = (char *) malloc(*len + 1);
-        memcpy(json, json_context_pop(&c, c.top), c.top);
-        json[*len] = '\0';
+        json = (char *) malloc(c.top + 1);
+        memcpy(json, c.stack, c.top);
+        json[c.top] = '\0';
     } else {
         if (len)
             *len = 0;
@@ -637,6 +646,7 @@ char *json_jsonify(const json_value *v, size_t *len)
     return json;
 }
 
+/* *********************************Access functions******************************** */
 int json_get_type(const json_value *v)
 {
     assert(v);
