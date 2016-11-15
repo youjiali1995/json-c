@@ -124,7 +124,7 @@ static int json_parse_number(json_context *c, json_value *v)
     errno = 0;
     v->number = strtod(c->json, NULL);
     /* man strtod HUGE_VAL */
-    if (errno = ERANGE && (v->number == HUGE_VAL || v->number == -HUGE_VAL))
+    if (errno == ERANGE && (v->number == HUGE_VAL || v->number == -HUGE_VAL))
         return JSON_PARSE_ERROR;
     v->type = JSON_NUMBER;
     c->json = p;
